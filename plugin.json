@@ -1,0 +1,20 @@
+{
+  "name": "zenwrite",
+  "version": "0.1.0",
+  "title": "zenwrite",
+  "description": "A calm Markdown writing app: live preview, alternatives, ghosts, versions, AI proofreading and shrink. Notes stay plain files.",
+  "author": "Zegoverno",
+  "license": "MIT",
+  "repository": "https://github.com/Zegoverno/zenwrite",
+  "server": { "command": "node", "args": ["mcp/dist/server.js"] },
+  "contributes": {
+    "openers": [
+      { "id": "write", "title": "Write", "ui": "ui://zenwrite/app", "patterns": ["*.md"], "mode": "edit" }
+    ],
+    "commands": [
+      { "name": "write", "tool": "zenwrite_open", "args": "<path>", "description": "Open a note in zenwrite." }
+    ]
+  },
+  "skills": "skills/",
+  "kernel": ["files:read", "files:write", "ai"]
+}

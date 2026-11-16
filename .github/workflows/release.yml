@@ -1,0 +1,48 @@
+# A tag v<version> makes a release: check, pack, and a GitHub release holding zenwrite-<version>.tgz
+# with its sha256 in the notes. The tag, package.json and plugin.json must name the same version.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Check (types, tests, build, archive)
+        run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Pack, with the tag checked against package.json and plugin.json
+        id: pack
+        run: |
+          set -euo pipefail
+          npm run build
+          node scripts/pack.mjs --tag "$GITHUB_REF_NAME" | tee pack.log
+          archive=$(node -p "const m=require('./plugin.json'); 'dist/' + m.name + '-' + m.version + '.tgz'")
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(sha256sum "$archive" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARCHIVE: ${{ steps.pack.outputs.archive }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' \
+            "Plugin archive for zenbot: \`$(basename "$ARCHIVE")\`." \
+            "" \
+            "sha256: \`$SHA256\`" \
+            "" \
+            "Install: \`zen plugins add zenwrite\` (or Settings → Marketplace in zenbot)." > notes.md
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE" --title "zenwrite ${GITHUB_REF_NAME#v}" --notes-file notes.md --verify-tag

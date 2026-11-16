@@ -1,0 +1,31 @@
+# The same checks as `npm run check` (types, build, unit and MCP tests, the release archive run from
+# an empty folder), then the browser tests: the PWA, and the app in a stand-in MCP Apps host.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - name: Chromium for the browser tests (Playwright)
+        run: npx playwright install --with-deps chromium
+      - run: npm run e2e
