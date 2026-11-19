@@ -97,16 +97,20 @@ try {
   assert.match(await text(), /Changed elsewhere/);
 
   step = 'versions through the tools';
+  await app.locator('.cm-content').click(); // Reload leaves focus on the banner button.
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' More.');
-  await app.locator('.status-saved').waitFor({ timeout: 10_000 });
+  // The saved badge may still show the previous save; wait for this edit on disk.
+  for (let i = 0; i < 100 && !(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8')).includes('More.'); i++) await page.waitForTimeout(100);
+  assert.match(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8'), /More\./);
   await page.keyboard.press('Alt+r');
   await page.keyboard.press('Alt+r');
   await page.keyboard.press('Alt+g');
-  await app.locator('.side input, .side textarea').first().waitFor();
-  await page.keyboard.type('two edits');
+  await app.locator('.side input, .side textarea').first().fill('two edits');
   await page.keyboard.press('Enter');
   await app.locator('.side', { hasText: 'two edits' }).waitFor({ timeout: 10_000 });
+  // The side panel updates before the asynchronous write necessarily finishes.
+  for (let i = 0; i < 100 && !(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8')).includes('v2: two edits'); i++) await page.waitForTimeout(100);
   assert.match(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8'), /v2: two edits/);
   assert.ok(await fs.stat(path.join(data, 'versions/Fixture.md/v2.md')));
 
