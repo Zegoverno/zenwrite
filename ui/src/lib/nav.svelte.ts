@@ -12,6 +12,10 @@ export interface ZenContext {
   path?: string | null;
   mode?: 'read' | 'edit';
   slot?: 'view' | 'opener' | 'game';
+  /** A phone: one panel at a time, no key hints. */
+  phone?: boolean;
+  /** The host's font for headings (a CSS font-family list). */
+  headingFont?: string;
 }
 
 let n = 0;

@@ -56,8 +56,8 @@ kbd { font-family: var(--sans); font-size: 0.85em; border: 1px solid var(--faint
 .page header .count:hover { color: var(--ink); }
 .page header .file { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-unsaved, .status-saving { color: var(--dim); }
-.status-conflict, .status-error { color: #c0392b; }
-.banner { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 6; background: var(--paper); border: 1px solid var(--faint); border-radius: 8px; padding: 10px 14px; font-size: 14px; display: flex; gap: 12px; align-items: center; max-width: 92cqw; }
+.status-conflict, .status-error { color: var(--err); }
+.banner { position: absolute; top: 44px; left: 50%; transform: translateX(-50%); z-index: 6; background: var(--paper); border: 1px solid var(--faint); border-radius: var(--radius-md, 8px); padding: 10px 14px; font-size: 14px; display: flex; gap: 12px; align-items: center; max-width: 92cqw; }
 .banner button { color: var(--accent); }
 .page footer { position: absolute; bottom: 0; left: 0; right: 0; display: flex; gap: 22px; justify-content: center; padding: 10px; font-size: 12px; color: var(--dim); background: color-mix(in srgb, var(--paper) 88%, transparent); }
 .bare footer, .bare header .file, .bare header .status { display: none; }
@@ -75,6 +75,7 @@ kbd { font-family: var(--sans); font-size: 0.85em; border: 1px solid var(--faint
 .sheet .cm-cursor { border-left: 2px solid var(--accent); }
 .sheet .cm-selectionBackground, .sheet .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 22%, transparent) !important; }
 .sheet .cm-placeholder { color: var(--faint); }
+.zw-h1, .zw-h2, .zw-h3 { font-family: var(--zw-heading-font, inherit); }
 .zw-h1 { font-size: 1.6em; font-weight: 650; letter-spacing: -0.01em; }
 .zw-h2 { font-size: 1.2em; font-weight: 650; }
 .zw-h3 { font-weight: 650; }
@@ -126,7 +127,7 @@ kbd { font-family: var(--sans); font-size: 0.85em; border: 1px solid var(--faint
 .panel li.sel > button:first-child { background: color-mix(in srgb, var(--faint) 60%, transparent); }
 .panel li .x { flex: none; padding: 8px; color: var(--dim); opacity: 0; border-radius: 6px; }
 .panel li:hover .x, .panel li.sel .x { opacity: 1; }
-.panel li .x:hover { color: #c0392b; }
+.panel li .x:hover { color: var(--err); }
 .panel .text { flex: 1; }
 .panel .robot { flex: none; }
 .panel .who { flex: none; width: 1.3em; text-align: center; }
@@ -135,7 +136,7 @@ kbd { font-family: var(--sans); font-size: 0.85em; border: 1px solid var(--faint
 .panel input:focus { border-color: var(--accent); }
 .panel .hint { color: var(--dim); font-size: 12px; margin: 0; }
 .flash { color: var(--accent); }
-.panel .err { color: #c0392b; font-size: 13px; margin: 0; }
+.panel .err { color: var(--err); font-size: 13px; margin: 0; }
 
 /* new note, home */
 .ask { max-width: 36rem; margin: 22vh auto 0; padding: 0 28px; display: flex; flex-direction: column; gap: 12px; }
@@ -214,7 +215,7 @@ header .ver.open { color: var(--accent); }
 .versions .log-in { position: relative; outline: none; background: color-mix(in srgb, var(--faint) 45%, transparent); }
 .versions .log-ghost { position: absolute; inset: 0; z-index: 1; pointer-events: none; color: var(--dim); opacity: .7; white-space: pre; overflow: hidden; }
 .versions .log-ghost .typed { color: transparent; }
-.versions .err { color: #c0392b; font-size: 12px; }
+.versions .err { color: var(--err); font-size: 12px; }
 .versions ul { list-style: none; margin: 2px 0 0; padding: 0; max-height: 9em; overflow: auto; }
 .versions li button { text-align: left; color: var(--dim); font-size: 12px; padding: 2px 0; line-height: 1.35; }
 .versions li button:hover { color: var(--ink); }
@@ -266,7 +267,7 @@ footer .global { color: var(--dim); opacity: .6; }
 .checkpanel .foot { margin-top: auto; display: flex; gap: 14px; align-items: baseline; font-size: 12px; }
 .checkpanel .foot button { color: var(--accent); padding: 0; font-size: 12px; }
 .checkpanel .foot button:last-child { color: var(--dim); }
-.checkpanel .err { color: #c0392b; font-size: 12px; }
+.checkpanel .err { color: var(--err); font-size: 12px; }
 .checkpanel kbd { font-size: 10px; }
 
 .side .notes-head { display: flex; justify-content: space-between; align-items: baseline; }
@@ -313,3 +314,8 @@ footer .global { color: var(--dim); opacity: .6; }
 .empty .err { color: var(--err); font-size: 14px; }
 .app-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: 14px; align-items: baseline; padding: 14px 18px; font-size: 13px; color: var(--dim); }
 .app-bar button:hover { color: var(--ink); }
+
+/* zenbot on a phone: one panel at a time (the editor sees to that), no key hints, a roomier tap target */
+:root[data-phone] .page footer { display: none; }
+:root[data-phone] .sheet .cm-content { padding-left: 20px; padding-right: 20px; }
+:root[data-phone] .sheet .cm-scroller { font-size: 19px; }

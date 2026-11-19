@@ -3,38 +3,31 @@
 import { mount } from 'svelte';
 import { App as McpApp, applyDocumentTheme, applyHostStyleVariables, type McpUiHostContext } from '@modelcontextprotocol/ext-apps';
 import App from './App.svelte';
+import { sizeOf, tokenAliases, zenOf } from './lib/host.ts';
 import { nav, requestOpen, type ZenContext } from './lib/nav.svelte.ts';
 import { mcpAi, mcpHost, mcpStore } from './stores/mcp.ts';
 import './app.css';
 
 const app = new McpApp({ name: 'zenwrite', version: __VERSION__ });
 
-/** Follows the host's theme and, when it gives them, its colors; the page keeps its own serif. */
+/** Follows the host's theme and colours, fonts, radii and shadow (its variables become the page's
+ *  tokens, see lib/host.ts), and its container's size; the note itself keeps its serif. Resent by the
+ *  host on change, so it is all live. */
 function look(ctx: McpUiHostContext | undefined) {
   if (!ctx) return;
+  const root = document.documentElement;
   if (ctx.theme) applyDocumentTheme(ctx.theme);
   const v = ctx.styles?.variables;
   if (v) {
     applyHostStyleVariables(v);
-    const root = document.documentElement.style;
-    const map: Array<[string, string]> = [['--paper', '--color-background-primary'], ['--ink', '--color-text-primary'], ['--dim', '--color-text-secondary'], ['--faint', '--color-border-primary']];
-    for (const [mine, theirs] of map) if (v[theirs as keyof typeof v]) root.setProperty(mine, `var(${theirs})`);
+    for (const [mine, value] of tokenAliases(v as Record<string, string | undefined>)) root.style.setProperty(mine, value);
   }
-}
-
-/** zenbot's part of the host context, `{ pane, path, mode, slot }`; undefined in other hosts. Only
- *  the values it knows are kept, so a host that sends something else changes nothing. */
-function zenOf(ctx: McpUiHostContext | undefined): ZenContext | undefined {
-  const z = (ctx as { zen?: unknown } | undefined)?.zen;
-  if (!z || typeof z !== 'object') return undefined;
-  const o = z as Record<string, unknown>;
-  const one = <T extends string>(v: unknown, ok: readonly T[]) => (ok.includes(v as T) ? (v as T) : undefined);
-  return {
-    pane: one(o.pane, ['board', 'side'] as const),
-    path: typeof o.path === 'string' && o.path ? o.path : null,
-    mode: one(o.mode, ['read', 'edit'] as const),
-    slot: one(o.slot, ['view', 'opener', 'game'] as const),
-  };
+  const size = sizeOf(ctx);
+  if (size) {
+    root.style.setProperty('--host-width', `${size.width}px`);
+    root.style.setProperty('--host-height', `${size.height}px`);
+    root.dataset.size = size.width < 760 ? 'compact' : 'roomy';
+  }
 }
 
 /** Where the app sits, for the CSS (`data-pane`, `data-slot`) and the editor (`mode`). */
@@ -45,6 +38,11 @@ function place(z: ZenContext | undefined) {
     if (z?.[k]) root[k] = z[k];
     else delete root[k];
   }
+  if (z?.phone) root.phone = '';
+  else delete root.phone;
+  const style = document.documentElement.style;
+  if (z?.headingFont) style.setProperty('--zw-heading-font', z.headingFont);
+  else style.removeProperty('--zw-heading-font');
 }
 
 // A tool result is the app's cue: zenwrite_open's carries the note; a refusal shows its reason.
