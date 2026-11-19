@@ -31,11 +31,16 @@
   } from './fixes.ts';
   import CheckPanel from './CheckPanel.svelte';
 
-  let { path, text, hash, store, ai, host, keys = true, reading = false, open, create }: {
+  let { path, text, hash, store, ai, host, keys = true, reading = false, hosted = false, phone = false, open, create }: {
     path: string; text: string; hash: string | null;
     store: Store; ai: Ai; host: Host;
     /** Opened to read (the host's `mode: "read"`): the page without its tools, read-only. */
     reading?: boolean;
+    /** Inside zenbot's Files: the host draws the title and the close ×, the note is saved on Ctrl/Cmd+S
+     *  (not as you type), what is typed and not saved is kept as a draft, and Done goes back to reading. */
+    hosted?: boolean;
+    /** On a phone: one panel at a time. */
+    phone?: boolean;
     /** Whether this pane has the keys. */
     keys?: boolean;
     /** Opens another note here. */
@@ -44,6 +49,17 @@
     create: (dir: string) => void;
   } = $props();
   const api = untrack(() => makeApi(store, ai));
+  // Hosted, saving is the writer's call: no autosave, so typing is kept as a draft until Ctrl/Cmd+S.
+  const manual = untrack(() => hosted);
+  const saveKey = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘S' : 'Ctrl+S';
+  // The quiet line's one-off notices ("Saved", "Draft restored") and the question asked on leaving.
+  let notice = $state('');
+  let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  let leaving = $state<(() => unknown) | null>(null);
+  let draftTimer: ReturnType<typeof setTimeout> | undefined;
+  let draftKept = false;
+  let draftTried = false;
+  let discarded = false;
 
   let sheet: HTMLDivElement;
   let view: EditorView;
@@ -381,6 +397,7 @@
     const out = currentText();
     if (out === lastSaved && base !== null) {
       status = 'saved';
+      if (manual) dropDraft();
       return;
     }
     status = 'saving';
@@ -390,6 +407,7 @@
       status = currentText() === out ? 'saved' : 'unsaved';
       refreshVersions();
       if (status === 'unsaved') schedule();
+      else if (manual) dropDraft();
     } catch (e) {
       if (e instanceof Conflict) {
         status = 'conflict';
@@ -404,7 +422,117 @@
 
   function schedule(ms = 900) {
     clearTimeout(timer);
+    if (manual) return keepDraft();
     timer = setTimeout(save, ms);
+  }
+
+  // --- drafts and leaving (hosted) ------------------------------------------------------------
+
+  const isDirty = () => status === 'unsaved' || status === 'saving' || status === 'error' || status === 'conflict';
+  function say(text: string, ms = 2500) {
+    notice = text;
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice = ''), ms);
+  }
+  /** Keeps what is typed as a draft a moment after the last key; a draft is not a save. */
+  function keepDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(putDraft, 400);
+  }
+  function putDraft() {
+    clearTimeout(draftTimer);
+    if (!store.drafts || discarded || viewing || !isDirty()) return;
+    draftKept = true;
+    void store.drafts.put(path, currentText(), base).catch(() => {});
+  }
+  function dropDraft() {
+    clearTimeout(draftTimer);
+    if (!draftKept) return;
+    draftKept = false;
+    void store.drafts?.drop(path).catch(() => {});
+  }
+  /** Brings back the draft of this note, unless the writer already typed or it is the note itself.
+   *  It keeps the hash it began from, so a note that changed meanwhile is caught when it is saved. */
+  async function restoreDraft() {
+    if (!manual || !store.drafts || draftTried) return;
+    draftTried = true;
+    const d = await store.drafts.get(path).catch(() => null);
+    if (!d || isDirty() || viewing) return;
+    const file = lastSaved;
+    if (d.text === file) {
+      draftKept = true;
+      return dropDraft();
+    }
+    load(d.text);
+    lastSaved = file;
+    base = d.base;
+    draftKept = true;
+    status = 'unsaved';
+    say('Draft restored', 6000);
+  }
+  async function saveNow() {
+    if (reading || viewing) return;
+    await save();
+    if (status === 'saved') say('Saved');
+  }
+  /** The note, read in zenbot's reader. False when the host did not take it. */
+  async function toReader(): Promise<boolean> {
+    return (await host.openNote?.(path, 'read').catch(() => false)) ?? false;
+  }
+  /** Runs `go` now, or once the writer chose what happens to what is unsaved. */
+  function askLeave(go: () => unknown) {
+    if (isDirty()) leaving = go;
+    else void go();
+  }
+  async function leaveGo(go: () => unknown) {
+    leaving = null;
+    if ((await go()) === false) {
+      // The host did not take it: stay here, with the note as the file has it.
+      discarded = false;
+      await reload().catch(() => {});
+    }
+  }
+  async function saveAndLeave() {
+    const go = leaving;
+    if (!go) return;
+    await save();
+    if (status !== 'saved' && status !== 'new') return; // the banner says why
+    await leaveGo(go);
+  }
+  async function discardAndLeave() {
+    const go = leaving;
+    if (!go) return;
+    discarded = true;
+    clearTimeout(draftTimer);
+    draftKept = true;
+    dropDraft();
+    await leaveGo(go);
+  }
+  /** Done: saves, then back to reading. */
+  async function done() {
+    if (isDirty()) await save();
+    if (isDirty()) return; // refused: the banner says why
+    dropDraft();
+    if ((await toReader()) === false) say('Could not go back to reading');
+  }
+  function windowKey(e: KeyboardEvent) {
+    if (!manual || e.defaultPrevented) return;
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      void saveNow();
+    } else if (e.key === 'Escape' && !reading && !viewing) {
+      if (leaving) {
+        e.preventDefault();
+        leaving = null;
+        view.focus();
+        return;
+      }
+      // Escape in the page's text (or nowhere in particular), not in a panel or the note finder.
+      const t = e.target as Element | null;
+      if (opening || (t && t !== document.body && !t.closest?.('.sheet'))) return;
+      e.preventDefault();
+      askLeave(toReader);
+    }
   }
 
   /** Takes the file as the server has it: the page shows it, and it counts as saved. */
@@ -549,6 +677,7 @@
 
   /** Leaves this note (for reading, or another note) once it is safely saved. */
   async function leaveTo(go: () => void) {
+    if (manual && !viewing) return void ((opening = false), askLeave(go));
     if (!viewing) await save();
     if (!viewing && status !== 'saved' && status !== 'new') {
       opening = false;
@@ -561,10 +690,15 @@
   function openLeft(t: (typeof LEFT)[number] | null) {
     if (panel && t !== 'alternatives') closePanel();
     left = t;
+    if (phone && t) right = null;
     active = t ? 'left' : 'right';
   }
   function openRight(t: (typeof RIGHT)[number] | null) {
     right = t;
+    if (phone && t) {
+      if (panel) closePanel();
+      left = null;
+    }
     active = t ? 'right' : 'left';
   }
   /** The tab after this one; null (the panel closes) after the last. */
@@ -644,7 +778,7 @@
       extensions: [
         Prec.highest(keymap.of([
           { key: 'Escape', run: () => picked !== null && ((picked = null), true) },
-          { key: 'Mod-s', run: () => (store.download ? (download(), true) : (save(), true)) },
+          { key: 'Mod-s', run: () => (manual ? (void saveNow(), true) : store.download ? (download(), true) : (save(), true)) },
         ])),
         history(),
         drawSelection(),
@@ -671,6 +805,9 @@
             u.startState.field(ghostsField) !== u.state.field(ghostsField);
           if (u.docChanged || changedGroups) {
             if (status !== 'conflict') status = base === null && !worthSaving() ? 'new' : 'unsaved';
+            // Hosted there is no autosave to notice that nothing really changed (a panel showing
+            // another variant, an undo back to the file): the note is what the file holds.
+            if (manual && status === 'unsaved' && base !== null && currentText() === lastSaved) status = 'saved';
             schedule();
           }
           refreshPanel();
@@ -695,24 +832,30 @@
     if (import.meta.env.DEV || new URLSearchParams(location.search).has('e2e')) (window as unknown as { __zw: EditorView }).__zw = view;
     load(text);
     if (reading) setTools(false);
+    else void restoreDraft();
     refreshVersions();
     const polling = setInterval(poll, store.pollMs ?? 4000);
     // A fresh note starts writing under its title; a note opened to read, at its top.
     if (base === null) view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
     view.focus();
     const leave = (e: BeforeUnloadEvent) => {
+      if (manual) return putDraft();
       if (status === 'unsaved' || status === 'saving') {
         save();
         e.preventDefault();
       }
     };
-    const hidden = () => document.visibilityState === 'hidden' && status === 'unsaved' && save();
+    const hidden = () => document.visibilityState === 'hidden' && (manual ? putDraft() : status === 'unsaved' && save());
     window.addEventListener('beforeunload', leave);
+    window.addEventListener('pagehide', leave);
     document.addEventListener('visibilitychange', hidden);
     return () => {
       // Leaving the pane (another file, the reader, a closed panel) saves what is left.
-      if (status === 'unsaved') save();
+      if (manual) putDraft();
+      else if (status === 'unsaved') save();
+      clearTimeout(noticeTimer);
       window.removeEventListener('beforeunload', leave);
+      window.removeEventListener('pagehide', leave);
       document.removeEventListener('visibilitychange', hidden);
       clearInterval(polling);
       view.destroy();
@@ -724,17 +867,50 @@
     const r = reading;
     untrack(() => {
       if (view && !viewing && tools === r) setTools(!r);
+      if (view && manual) {
+        if (r) putDraft();
+        else void restoreDraft();
+      }
     });
   });
 
+  /** The quiet line in zenbot: nothing while all is saved. */
+  const zenStatus = $derived(
+    status === 'conflict' ? 'Changed on disk' : status === 'error' ? 'Not saved' : notice ? notice
+      : status === 'saving' ? 'Saving…' : status === 'unsaved' ? `Unsaved changes · ${saveKey} saves` : '',
+  );
   const statusText = $derived(
     { saved: 'Saved', unsaved: 'Unsaved', saving: 'Saving…', conflict: 'Changed on disk', error: 'Not saved', new: 'New' }[status],
   );
 </script>
 
-<svelte:window onkeydowncapture={pageKeys} />
+<svelte:window onkeydowncapture={pageKeys} onkeydown={windowKey} />
 
 <div class="page" class:bare={!tools} class:with-panel={tools && left} class:with-side={tools && right}>
+  {#if hosted}
+    {#if !reading}
+      <div class="zenbar">
+        <span class="count">{words} {words === 1 ? 'word' : 'words'}</span>
+        {#if viewing}<span class="ver">v{viewing.n} · closed</span>{/if}
+        {#if leaving}
+          <div class="leave" role="alertdialog" aria-label="Unsaved changes">
+            <span>You have unsaved changes.</span>
+            <button onclick={() => ((leaving = null), view.focus())}>Keep editing</button>
+            <button class="primary" onclick={saveAndLeave}>Save and leave</button>
+            <button class="danger" onclick={discardAndLeave}>Discard</button>
+          </div>
+        {:else}
+          <span class="zb-status" class:warn={status === 'conflict' || status === 'error'} role="status" aria-live="polite">{zenStatus}</span>
+        {/if}
+        <span class="sp"></span>
+        {#if phone}
+          <button class="zb-tool" onclick={() => openLeft(after(LEFT, left))}>Tools</button>
+          <button class="zb-tool" onclick={() => openRight(after(RIGHT, right))}>Note</button>
+        {/if}
+        {#if !leaving}<button class="zb-done" onclick={done} title="Save and go back to reading">Done</button>{/if}
+      </div>
+    {/if}
+  {:else}
   <header>
     <button class="home" onclick={() => (opening = !opening)} title="Open a note (Alt+O)">Notes</button>
     <span class="count">{words} {words === 1 ? 'word' : 'words'}</span>
@@ -749,6 +925,7 @@
       {#if store.download}<button class="home" onclick={download} title="Save the note as a file (Ctrl+S)">Download</button>{/if}
     {/if}
   </header>
+  {/if}
 
   {#if viewing}
     <div class="banner viewing">

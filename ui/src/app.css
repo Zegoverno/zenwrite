@@ -319,3 +319,23 @@ footer .global { color: var(--dim); opacity: .6; }
 :root[data-phone] .page footer { display: none; }
 :root[data-phone] .sheet .cm-content { padding-left: 20px; padding-right: 20px; }
 :root[data-phone] .sheet .cm-scroller { font-size: 19px; }
+
+/* zenbot's Files: the host draws the title and the ×; a quiet bar carries the count, what is
+   unsaved, and Done. Calm: the same paper, dim words, one accent button. */
+.zenbar { position: absolute; top: 0; left: 0; right: 0; z-index: 5; display: flex; align-items: center; gap: 14px; padding: 10px 18px; font-size: 13px; color: var(--dim); background: color-mix(in srgb, var(--paper) 88%, transparent); }
+.zenbar .sp { flex: 1; }
+.zenbar .ver { color: var(--dim); }
+.zb-status { min-height: 1.2em; color: var(--dim); }
+.zb-status.warn { color: var(--err); }
+.zb-tool { color: var(--dim); padding: 3px 8px; }
+.zb-tool:hover { color: var(--ink); }
+.zb-done { color: var(--on-accent, var(--paper)); background: var(--accent); border: 1px solid var(--accent); border-radius: var(--radius-full, 99px); padding: 4px 16px; font-size: 13px; font-weight: 600; }
+.zb-done:hover { background: color-mix(in srgb, var(--accent) 85%, var(--ink)); }
+.leave { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: 13px; color: var(--ink); padding: 3px 12px; border-radius: var(--radius-full, 99px);
+  background: color-mix(in srgb, var(--warn) 12%, var(--paper)); border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--faint)); }
+.leave button { color: var(--accent); padding: 2px 4px; }
+.leave button.primary { font-weight: 600; }
+.leave button.danger { color: var(--err); }
+.zenbar .count, .zb-status { white-space: nowrap; }
+.zb-status { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+:root[data-phone] .zenbar .count { display: none; }

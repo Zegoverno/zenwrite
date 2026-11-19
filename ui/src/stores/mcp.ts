@@ -48,6 +48,14 @@ export function mcpStore(app: App, label = 'Notes'): Store {
       return { text: data.text as string, hash: data.hash as string };
     },
     async write(path, text, base) { return { hash: (await ask(app, 'zenwrite_save', { path, text, base_hash: base })).hash as string }; },
+    drafts: {
+      async get(path) {
+        const d = (await ask(app, 'zenwrite_draft_get', { path })).draft as { text: string; base: string | null } | null;
+        return d && typeof d.text === 'string' ? { text: d.text, base: d.base ?? null } : null;
+      },
+      async put(path, text, base) { await ask(app, 'zenwrite_draft_put', { path, text, base_hash: base }); },
+      async drop(path) { await ask(app, 'zenwrite_draft_drop', { path }); },
+    },
     async versions(path) { return (await ask(app, 'zenwrite_versions', { path })) as unknown as VersionState; },
     async version(path, n) {
       const { data, error } = await call(app, 'zenwrite_open_version', { path, n });
@@ -79,7 +87,7 @@ export function mcpAi(app: App): Ai {
 }
 
 /** zenbot's link to a file: `zen://open?path=<relative path>`. */
-export const zenOpen = (path: string) => `zen://open?path=${encodeURIComponent(path)}`;
+export const zenOpen = (path: string, mode?: 'read' | 'edit') => `zen://open?path=${encodeURIComponent(path)}${mode ? `&mode=${mode}` : ''}`;
 
 export function mcpHost(app: App): Host {
   return {
@@ -88,9 +96,9 @@ export function mcpHost(app: App): Host {
     openFile: (path) => void app.openLink({ url: zenOpen(path) }).catch(() => {}),
     // In zenbot (its context is there) another note goes to the host, which sends it to that note's
     // opener and keeps its panes in step; elsewhere the app opens it itself.
-    async openNote(path) {
+    async openNote(path, mode) {
       if (!(app.getHostContext() as { zen?: unknown } | undefined)?.zen) return false;
-      const r = await app.openLink({ url: zenOpen(path) });
+      const r = await app.openLink({ url: zenOpen(path, mode) });
       return !r.isError;
     },
     noteOpened: (path) => void app.updateModelContext({ content: [{ type: 'text', text: `zenwrite has the note ${path} open.` }] }).catch(() => {}),
