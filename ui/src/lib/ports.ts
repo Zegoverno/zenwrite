@@ -25,6 +25,13 @@ export interface Store {
   version(path: string, n: number): Promise<string | null>;
   close(path: string, base: string, log: string): Promise<Changed>;
   branch(path: string, base: string, n: number): Promise<Changed>;
+  /** Unsaved text kept for a note, so closing the editor loses nothing (where the host edits a note
+   *  without saving as you type). `base` is the note's hash when the draft began. */
+  drafts?: {
+    get(path: string): Promise<{ text: string; base: string | null } | null>;
+    put(path: string, text: string, base: string | null): Promise<void>;
+    drop(path: string): Promise<void>;
+  };
   /** Only where saving means a download (a single file opened without folder access). */
   download?(path: string): void;
 }
@@ -47,9 +54,9 @@ export interface Host {
   openUrl(url: string): void;
   /** A link to a file that is not a note (the host decides what opens it). */
   openFile(path: string): void;
-  /** Another note, handed to the host to open (zenbot sends it to the note's opener). Resolves
+  /** Another note, handed to the host to open (zenbot sends it to the note's opener, in the mode asked). Resolves
    *  false when the host did not take it, and the app opens it itself. */
-  openNote?(path: string): Promise<boolean>;
+  openNote?(path: string, mode?: 'read' | 'edit'): Promise<boolean>;
   /** The note now open, for hosts that listen (a chat knowing what you write). */
   noteOpened?(path: string, words: number): void;
 }

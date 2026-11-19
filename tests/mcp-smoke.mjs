@@ -43,7 +43,7 @@ try {
   const tools = (await client.listTools()).tools;
   const names = tools.map((t) => t.name).sort();
   assert.deepEqual(names, [
-    'alternatives', 'branch_version', 'changelog_suggest', 'check', 'close_version', 'find_notes',
+    'alternatives', 'branch_version', 'changelog_suggest', 'check', 'close_version', 'draft_drop', 'draft_get', 'draft_put', 'find_notes',
     'list', 'open', 'open_version', 'read', 'save', 'shrink', 'versions',
   ].map((t) => `${name}_${t}`).sort());
   assert.equal(tools.find((t) => t.name === `${name}_open`)._meta.ui.resourceUri, UI);
@@ -74,6 +74,18 @@ try {
   const hits = ok(await call(client, `${name}_find_notes`, { path: 'Rivers.md', queries: ['salt water'] }), 'find_notes with queries').hits;
   assert.deepEqual(hits.map((h) => h.path), ['ideas/Sea.md']);
 
+  // drafts: kept in the data folder, never in the notes folder, and not a save
+  assert.equal(ok(await call(client, `${name}_draft_get`, { path: 'Rivers.md' }), 'draft_get').draft, null);
+  ok(await call(client, `${name}_draft_put`, { path: 'Rivers.md', text: '# Rivers\n\nHalf typed', base_hash: 'abc' }), 'draft_put');
+  const kept = ok(await call(client, `${name}_draft_get`, { path: 'Rivers.md' }), 'draft_get').draft;
+  assert.equal(kept.text, '# Rivers\n\nHalf typed');
+  assert.equal(kept.base, 'abc');
+  assert.ok(existsSync(path.join(data, 'drafts')), 'drafts are kept in ZEN_PLUGIN_DATA');
+  assert.doesNotMatch(readFileSync(path.join(files, 'Rivers.md'), 'utf8'), /Half typed/);
+  ok(await call(client, `${name}_draft_drop`, { path: 'Rivers.md' }), 'draft_drop');
+  assert.equal(ok(await call(client, `${name}_draft_get`, { path: 'Rivers.md' }), 'draft_get').draft, null);
+  assert.equal((await call(client, `${name}_draft_put`, { path: '../x.md', text: 'x' })).isError, true);
+
   // AI tools, without sampling
   for (const [tool, args] of [
     ['alternatives', { paragraph: 'A big day.', target: 'big', scope: 'word' }],
@@ -102,6 +114,7 @@ try {
   const r = await call(bare, `${name}_read`, { path: 'Rivers.md' });
   assert.equal(r.isError, true);
   assert.match(r.content[0].text, /ZEN_PLUGIN_FILES is not set/);
+  assert.equal((await call(bare, `${name}_draft_put`, { path: 'Rivers.md', text: 'x' })).isError, true, 'no data folder, no drafts');
 } finally {
   await bare.close();
   rmSync(tmp, { recursive: true, force: true });

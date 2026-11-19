@@ -38,7 +38,7 @@
 
   /** A note the writer asked for: the host's to open when it takes notes (zenbot), else here. */
   async function goTo(path: string) {
-    if (host.openNote && (await host.openNote(path).catch(() => false))) return;
+    if (host.openNote && (await host.openNote(path, nav.zen?.mode).catch(() => false))) return;
     await openNote(path);
   }
 
@@ -75,7 +75,7 @@
     {#key current.key}
       <Editor
         path={current.path} text={current.text} hash={current.hash} {store} {ai} {host}
-        reading={nav.zen?.mode === 'read'}
+        reading={nav.zen?.mode === 'read'} hosted={!!nav.zen} phone={!!nav.zen?.phone}
         open={(p) => void goTo(p)} create={(dir) => (naming = { dir, name: '' })} />
     {/key}
   {:else}

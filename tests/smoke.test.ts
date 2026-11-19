@@ -55,7 +55,7 @@ describe('the server', () => {
   it('lists its tools and the app resource', async () => {
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
-      'zenwrite_alternatives', 'zenwrite_branch_version', 'zenwrite_changelog_suggest', 'zenwrite_check', 'zenwrite_close_version', 'zenwrite_find_notes',
+      'zenwrite_alternatives', 'zenwrite_branch_version', 'zenwrite_changelog_suggest', 'zenwrite_check', 'zenwrite_close_version', 'zenwrite_draft_drop', 'zenwrite_draft_get', 'zenwrite_draft_put', 'zenwrite_find_notes',
       'zenwrite_list', 'zenwrite_open', 'zenwrite_open_version', 'zenwrite_read', 'zenwrite_save', 'zenwrite_shrink', 'zenwrite_versions',
     ]);
     const open = tools.find((t) => t.name === 'zenwrite_open')!;

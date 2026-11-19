@@ -97,16 +97,20 @@ try {
   assert.match(await text(), /Changed elsewhere/);
 
   step = 'versions through the tools';
+  await app.locator('.cm-content').click(); // Reload leaves focus on the banner button.
   await page.keyboard.press('Control+End');
   await page.keyboard.type(' More.');
-  await app.locator('.status-saved').waitFor({ timeout: 10_000 });
+  // The saved badge may still show the previous save; wait for this edit on disk.
+  for (let i = 0; i < 100 && !(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8')).includes('More.'); i++) await page.waitForTimeout(100);
+  assert.match(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8'), /More\./);
   await page.keyboard.press('Alt+r');
   await page.keyboard.press('Alt+r');
   await page.keyboard.press('Alt+g');
-  await app.locator('.side input, .side textarea').first().waitFor();
-  await page.keyboard.type('two edits');
+  await app.locator('.side input, .side textarea').first().fill('two edits');
   await page.keyboard.press('Enter');
   await app.locator('.side', { hasText: 'two edits' }).waitFor({ timeout: 10_000 });
+  // The side panel updates before the asynchronous write necessarily finishes.
+  for (let i = 0; i < 100 && !(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8')).includes('v2: two edits'); i++) await page.waitForTimeout(100);
   assert.match(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8'), /v2: two edits/);
   assert.ok(await fs.stat(path.join(data, 'versions/Fixture.md/v2.md')));
 
@@ -145,9 +149,188 @@ try {
   await zen.keyboard.type('fixture');
   await zen.keyboard.press('Enter');
   await zen.waitForFunction(() => window.links.length > 0, null, { timeout: 10_000 });
-  assert.deepEqual(await zen.evaluate(() => window.links), ['zen://open?path=Fixture.md']);
+  assert.deepEqual(await zen.evaluate(() => window.links), ['zen://open?path=Fixture.md&mode=edit'], 'edit stays edit');
   await zen.evaluate(() => window.setContext({ zen: { pane: 'side', path: 'Fixture.md', mode: 'edit', slot: 'opener' } }));
   await zapp.locator('.cm-content', { hasText: 'Changed elsewhere' }).waitFor({ timeout: 10_000 });
+
+  // --- zenbot's Files: the editor as the Edit of a note ------------------------------------------
+  const zenHost = async (note, extra = {}) => {
+    const p = await context.newPage();
+    p.on('pageerror', (e) => errors.push(e.message));
+    await host(p, {
+      theme: 'light',
+      styles: { variables: {
+        '--color-background-primary': 'rgb(250, 249, 245)', '--color-text-primary': 'rgb(31, 29, 26)', '--color-text-info': 'rgb(74, 122, 90)',
+        '--color-text-danger': 'rgb(181, 84, 60)', '--border-radius-md': '11px', '--font-sans': 'Inter, sans-serif',
+      } },
+      containerDimensions: { width: 900, height: 700 },
+      zen: { pane: 'board', path: note, mode: 'edit', slot: 'opener', phone: false, headingFont: 'Fraunces, serif', ...extra },
+    }, null);
+    const a = p.frameLocator('#app');
+    await a.locator('.cm-content[contenteditable=true]').waitFor({ timeout: 15_000 });
+    return { p, a, links: () => p.evaluate(() => window.links) };
+  };
+  const onDisk = (n) => fs.readFile(path.join(dir, n), 'utf8');
+  const draft = async (n) => JSON.parse((await client.callTool({ name: 'zenwrite_draft_get', arguments: { path: n } })).content[0].text).draft;
+  await fs.writeFile(path.join(dir, 'Zen.md'), '# Zen\n\nCalm words.\n');
+
+  step = 'zenbot edit: the host\'s tokens, size, phone and heading font apply, live';
+  {
+    const { p, a } = await zenHost('Zen.md');
+    const css = (name) => p.evaluate((n) => getComputedStyle(document.getElementById('app').contentDocument.documentElement).getPropertyValue(n).trim(), name);
+    assert.equal(await css('--color-background-primary'), 'rgb(250, 249, 245)');
+    assert.equal(await css('--accent'), await css('--color-text-info'));
+    assert.equal(await css('--radius-md'), '11px');
+    assert.equal(await css('--host-width'), '900px');
+    assert.equal(await css('--zw-heading-font'), 'Fraunces, serif');
+    assert.equal(await a.locator('header').count(), 0, 'the host draws the title: no own header');
+    assert.equal(await a.locator('.zb-tool').count(), 0, 'no phone buttons on a desktop');
+    await p.evaluate(() => window.setContext({
+      theme: 'dark', styles: { variables: { '--color-text-info': 'rgb(1, 2, 3)' } }, containerDimensions: { width: 400, height: 600 },
+      zen: { pane: 'board', path: 'Zen.md', mode: 'edit', slot: 'opener', phone: true },
+    }));
+    await a.locator('.zb-tool').first().waitFor({ timeout: 5000 });
+    const root = await p.evaluate(() => ({ ...document.getElementById('app').contentDocument.documentElement.dataset }));
+    assert.equal(root.theme, 'dark');
+    assert.equal(root.size, 'compact');
+    assert.ok('phone' in root);
+    assert.equal(await css('--zw-heading-font'), '');
+    assert.equal(await css('--host-width'), '400px');
+    assert.equal(await css('--color-text-info'), 'rgb(1, 2, 3)');
+    // one panel at a time on a phone
+    await a.locator('.zb-tool', { hasText: 'Tools' }).click();
+    await a.locator('.panel').waitFor();
+    await a.locator('.zb-tool', { hasText: 'Note' }).click();
+    await a.locator('.side').waitFor();
+    assert.equal(await a.locator('.panel').count(), 0);
+    await p.close();
+  }
+
+  step = 'zenbot edit: no autosave; the quiet line; Ctrl+S saves';
+  {
+    const { p, a } = await zenHost('Zen.md');
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Control+End');
+    await p.keyboard.type(' Typed.');
+    await a.locator('.zb-status', { hasText: 'Unsaved changes · ' }).waitFor({ timeout: 5000 });
+    assert.match(await a.locator('.zb-status').textContent(), /^Unsaved changes · (Ctrl\+S|⌘S) saves$/);
+    await p.waitForTimeout(1600);
+    assert.doesNotMatch(await onDisk('Zen.md'), /Typed\./, 'nothing is saved as you type');
+    await p.keyboard.press('Control+s');
+    await a.locator('.zb-status', { hasText: 'Saved' }).waitFor({ timeout: 5000 });
+    assert.match(await onDisk('Zen.md'), /Calm words\.\n Typed\./);
+    await a.locator('.zb-status', { hasText: 'Saved' }).waitFor({ state: 'detached', timeout: 6000 }).catch(() => {});
+    assert.equal((await a.locator('.zb-status').textContent()).trim(), '', 'quiet when saved');
+    await p.close();
+  }
+
+  step = 'zenbot edit: a draft is kept per note and comes back with a notice';
+  {
+    const first = await zenHost('Zen.md');
+    await first.a.locator('.cm-content').click();
+    await first.p.keyboard.press('Control+End');
+    await first.p.keyboard.type(' Half a thought');
+    await first.p.waitForFunction(() => true);
+    for (let i = 0; i < 50 && !(await draft('Zen.md')); i++) await first.p.waitForTimeout(100);
+    assert.match((await draft('Zen.md')).text, /Half a thought/);
+    assert.doesNotMatch(await onDisk('Zen.md'), /Half a thought/);
+    await first.p.close(); // the frame is gone: switching tabs tears it down
+    const back = await zenHost('Zen.md');
+    await back.a.locator('.zb-status', { hasText: 'Draft restored' }).waitFor({ timeout: 8000 });
+    assert.match(await back.a.locator('.cm-content').innerText(), /Half a thought/);
+    assert.doesNotMatch(await onDisk('Zen.md'), /Half a thought/, 'a restored draft is not a save');
+    // another note has no draft
+    const other = await zenHost('Other.md');
+    assert.doesNotMatch(await other.a.locator('.cm-content').innerText(), /Half a thought/);
+    await other.p.close();
+    // Ctrl+S saves it and the draft goes
+    await back.p.keyboard.press('Control+s');
+    await back.a.locator('.zb-status', { hasText: 'Saved' }).waitFor({ timeout: 5000 });
+    assert.match(await onDisk('Zen.md'), /Half a thought/);
+    for (let i = 0; i < 50 && (await draft('Zen.md')); i++) await back.p.waitForTimeout(100);
+    assert.equal(await draft('Zen.md'), null);
+    await back.p.close();
+  }
+
+  step = 'zenbot edit: Esc with nothing unsaved goes back to reading';
+  {
+    const { p, a, links } = await zenHost('Zen.md');
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Escape');
+    await p.waitForFunction(() => window.links.length > 0, null, { timeout: 5000 });
+    assert.deepEqual(await links(), ['zen://open?path=Zen.md&mode=read']);
+    await p.close();
+  }
+
+  step = 'zenbot edit: Esc with unsaved changes asks: keep editing, save and leave, discard';
+  {
+    const { p, a, links } = await zenHost('Zen.md');
+    const before = await onDisk('Zen.md');
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Control+End');
+    await p.keyboard.type(' Maybe.');
+    await p.keyboard.press('Escape');
+    await a.locator('.leave[role=alertdialog]').waitFor({ timeout: 5000 });
+    assert.match(await a.locator('.leave').textContent(), /You have unsaved changes/);
+    assert.deepEqual(await links(), [], 'it did not leave');
+    await a.locator('.leave button', { hasText: 'Keep editing' }).click();
+    assert.equal(await a.locator('.leave').count(), 0);
+    assert.match(await a.locator('.cm-content').innerText(), /Maybe\./);
+    await p.keyboard.press('Escape');
+    await a.locator('.leave').waitFor();
+    await p.keyboard.press('Escape'); // a second Esc is Keep editing
+    await a.locator('.leave').waitFor({ state: 'detached' });
+    await p.keyboard.press('Escape');
+    await a.locator('.leave button', { hasText: 'Discard' }).click();
+    await p.waitForFunction(() => window.links.length > 0, null, { timeout: 5000 });
+    assert.deepEqual(await links(), ['zen://open?path=Zen.md&mode=read']);
+    assert.equal(await onDisk('Zen.md'), before, 'discard writes nothing');
+    await p.waitForTimeout(800);
+    assert.equal(await draft('Zen.md'), null, 'and keeps no draft');
+    await p.close();
+
+    const two = await zenHost('Zen.md');
+    await two.a.locator('.cm-content').click();
+    await two.p.keyboard.press('Control+End');
+    await two.p.keyboard.type(' Kept.');
+    await two.p.keyboard.press('Escape');
+    await two.a.locator('.leave button', { hasText: 'Save and leave' }).click();
+    await two.p.waitForFunction(() => window.links.length > 0, null, { timeout: 5000 });
+    assert.deepEqual(await two.links(), ['zen://open?path=Zen.md&mode=read']);
+    assert.match(await onDisk('Zen.md'), /Kept\./);
+    await two.p.close();
+  }
+
+  step = 'zenbot edit: Done saves and goes back to reading';
+  {
+    const { p, a, links } = await zenHost('Zen.md');
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Control+End');
+    await p.keyboard.type(' Done now.');
+    await a.locator('.zb-done').click();
+    await p.waitForFunction(() => window.links.length > 0, null, { timeout: 5000 });
+    assert.deepEqual(await links(), ['zen://open?path=Zen.md&mode=read']);
+    assert.match(await onDisk('Zen.md'), /Done now\./);
+    assert.equal(await draft('Zen.md'), null);
+    await p.close();
+  }
+
+  step = 'zenbot edit: a note that changed since the draft is not overwritten';
+  {
+    const first = await zenHost('Zen.md');
+    await first.a.locator('.cm-content').click();
+    await first.p.keyboard.press('Control+End');
+    await first.p.keyboard.type(' Stale draft.');
+    for (let i = 0; i < 50 && !(await draft('Zen.md')); i++) await first.p.waitForTimeout(100);
+    await first.p.close();
+    await fs.writeFile(path.join(dir, 'Zen.md'), '# Zen\n\nChanged by an agent.\n');
+    const back = await zenHost('Zen.md');
+    await back.a.locator('.zb-status', { hasText: 'Draft restored' }).waitFor({ timeout: 8000 });
+    await back.p.keyboard.press('Control+s');
+    await back.a.locator('.banner[role=alert]').waitFor({ timeout: 8000 });
+    assert.equal(await onDisk('Zen.md'), '# Zen\n\nChanged by an agent.\n');
+    await back.p.close();
+  }
 
   assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);
   console.log('host e2e ok');

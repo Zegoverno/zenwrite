@@ -52,7 +52,7 @@ Body, as it reads.
 
 `Alt+L` left panel (alternatives, check, ghosts), then its next tab, then closed · `Alt+R` the same
 for the right panel (notes, versions, properties) · `Alt+O` open a note · `Ctrl+S` save (it also
-saves as you type; in a single-file browser it downloads).
+saves as you type, except in zenbot's Files; in a single-file browser it downloads).
 
 The same four keys act on the tab of the panel opened last:
 
@@ -81,14 +81,42 @@ you choose (zenbot, Claude Code or Codex).
 
 ```bash
 npm run pack
-zen plugins add ./dist/zenwrite-0.1.0.tgz
+zen plugins add ./dist/zenwrite-0.3.0.tgz
 ```
 
 It asks for `files:read` and `files:write` on the notes folder, and `ai` to ask the host's model
 through MCP sampling. No network permission or telemetry: file contents reach the host's model
-only when you request AI help. Choose *Write* as your Markdown opener in Settings → Plugins;
-installation does not replace the default. `/write <path>` opens a note. The host must support
-sampling for AI help (see below).
+only when you request AI help. Installing makes *Write* the opener for `*.md` in edit mode;
+change it in Settings → Plugins. `/write <path>` opens a note. The host must support sampling for
+AI help (see below).
+
+### The Edit of a note in zenbot's Files
+
+zenbot's Files reads a note with the reader plugin and edits it with zenwrite. Inside zenbot (the
+host context carries `zen`) the page behaves as the Edit:
+
+- **Looks like its host.** The theme (`light` or `dark`, the app's own choice) and the host's
+  style variables (paper, soft, border, text, accent, danger/success/warning, fonts, radii, shadow)
+  become the page's colours, live as the host resends them; `containerDimensions` and `zen.phone`
+  shape the layout (on a phone one panel opens at a time, with *Tools* and *Note* buttons, and no
+  key hints); `zen.headingFont` styles the headings. The note itself stays in the page's serif.
+- **The host's chrome, not its own.** zenbot draws the title and the close ×, so the page's header
+  is gone. A quiet bar shows the word count, and *Unsaved changes · ⌘S saves* while there are
+  changes (*Ctrl+S* off a Mac), *Saved* after a save, and a **Done** button.
+- **Saving is yours.** There is no autosave there. `Ctrl/Cmd+S` saves (the same safe save as
+  everywhere: refused if the file changed since). **Done** saves and goes back to reading
+  (`zen://open?path=…&mode=read`).
+- **Esc** goes back to reading; with unsaved changes it asks first: *Keep editing*, *Save and
+  leave* or *Discard*. Opening another note from the page asks the same.
+- **Drafts.** What you type and have not saved is kept as a draft per note and comes back, with a
+  *Draft restored* notice, when the note is opened again (switching tabs closes the frame). The
+  app runs in a sandboxed frame without storage, so the server keeps them in the plugin's data
+  folder (`drafts/`, named by a hash of the path; never in your notes folder). A draft remembers
+  the note's hash: if the note changed since, saving it is refused with the *Reload / Keep mine*
+  choice, never an overwrite. Saving, Done, and Discard remove the draft.
+
+Outside zenbot (the standalone app, Claude, ChatGPT) the page keeps its header and saves as you
+type.
 
 ## Use it in Claude or ChatGPT
 
@@ -116,6 +144,9 @@ folders (only the plugin's own `.versions`), no symlinks out.
 | `zenwrite_read` `{path}` | `{path, text, hash}` |
 | `zenwrite_list` | `{files}` |
 | `zenwrite_save` `{path, text, base_hash?}` | atomic; refused (error with `conflict: true` and the current text and hash) if the file changed since `base_hash`; omit it to create |
+| `zenwrite_draft_get` `{path}` | the app's unsaved draft of a note: `{draft: {text, base, at}}` or `{draft: null}` (needs `ZEN_PLUGIN_DATA`) |
+| `zenwrite_draft_put` `{path, text, base_hash?}` | keeps a draft in the data folder; not a save |
+| `zenwrite_draft_drop` `{path}` | forgets it |
 | `zenwrite_versions` `{path}` | `{versions, current, open}` |
 | `zenwrite_close_version` `{path, changelog, base_hash?, by?}` | freezes `.versions/<note>/vN.md`, adds the changelog line; returns the new text and hash |
 | `zenwrite_open_version` `{path, n}` | `{text}` of a closed version |
