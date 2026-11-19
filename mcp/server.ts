@@ -26,6 +26,7 @@ import { Conflict, Notes } from '../core/notes.ts';
 import { parseNote, withoutGhosts } from '../core/note.ts';
 import { searchDocs, type Doc } from '../core/search.ts';
 import { VersionError } from '../core/versions.ts';
+import { Drafts } from './drafts.ts';
 import { dataIo, listNotes, nodeIo, notePath, openData, openRoot, PathError, versionsIo } from './fsio.ts';
 import { instructions } from './skills.ts';
 
@@ -79,6 +80,15 @@ export function createServer(opts: Options = {}): McpServer {
       return { root, notes: new Notes(files, root, vio) };
     })().catch((e) => {
       folder = null; // try again next call (the folder may appear)
+      throw e;
+    }));
+  };
+  // Drafts: unsaved text, kept in the data folder; there is no draft without one.
+  let draftsOf: Promise<Drafts> | null = null;
+  const drafts = () => {
+    if (!dataDir) return Promise.reject(new PathError('ZEN_PLUGIN_DATA is not set: drafts cannot be kept'));
+    return (draftsOf ??= openData(dataDir).then((d) => new Drafts(d)).catch((e) => {
+      draftsOf = null;
       throw e;
     }));
   };
@@ -148,6 +158,37 @@ export function createServer(opts: Options = {}): McpServer {
     const { notes } = await open();
     const p = notePath(rel);
     return ok({ path: p, ...(await notes.save(p, text, base_hash ?? null)) });
+  }));
+
+  // Drafts belong to the app: the text typed and not yet saved, so closing the editor loses nothing.
+  // They never touch the notes folder, and a draft is not a save.
+  server.registerTool('zenwrite_draft_get', {
+    title: 'Read the draft of a note',
+    description: 'The unsaved draft kept for a note ({draft: null} when there is none): its text, the hash of the note it began from, and when.',
+    inputSchema: { path: pathArg },
+    annotations: { readOnlyHint: true },
+  }, guard(async ({ path: rel }: { path: string }) => ok({ path: notePath(rel), draft: await (await drafts()).get(notePath(rel)) })));
+
+  server.registerTool('zenwrite_draft_put', {
+    title: 'Keep a draft of a note',
+    description: 'Keeps unsaved text for a note in the plugin\'s data folder (not the notes folder), replacing its earlier draft. base_hash is the hash of the note it began from.',
+    inputSchema: { path: pathArg, text: z.string(), base_hash: z.string().nullish() },
+    annotations: { idempotentHint: true },
+  }, guard(async ({ path: rel, text, base_hash }: { path: string; text: string; base_hash?: string | null }) => {
+    const p = notePath(rel);
+    await (await drafts()).put(p, text, base_hash ?? null);
+    return ok({ path: p });
+  }));
+
+  server.registerTool('zenwrite_draft_drop', {
+    title: 'Drop the draft of a note',
+    description: 'Forgets the draft kept for a note (after it was saved or discarded).',
+    inputSchema: { path: pathArg },
+    annotations: { idempotentHint: true },
+  }, guard(async ({ path: rel }: { path: string }) => {
+    const p = notePath(rel);
+    await (await drafts()).drop(p);
+    return ok({ path: p });
   }));
 
   server.registerTool('zenwrite_versions', {
