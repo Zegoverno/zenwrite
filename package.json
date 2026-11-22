@@ -1,6 +1,6 @@
 {
   "name": "zenwrite",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A calm Markdown writing app: live preview, alternatives, ghosts, versions. A standalone PWA, a zen plugin and an MCP App.",
   "license": "MIT",
   "type": "module",
