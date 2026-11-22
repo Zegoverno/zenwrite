@@ -81,7 +81,7 @@ you choose (zenbot, Claude Code or Codex).
 
 ```bash
 npm run pack
-zen plugins add ./dist/zenwrite-0.3.0.tgz
+zen plugins add ./dist/zenwrite-0.4.0.tgz
 ```
 
 It asks for `files:read` and `files:write` on the notes folder, and `ai` to ask the host's model
@@ -114,6 +114,16 @@ host context carries `zen`) the page behaves as the Edit:
   folder (`drafts/`, named by a hash of the path; never in your notes folder). A draft remembers
   the note's hash: if the note changed since, saving it is refused with the *Reload / Keep mine*
   choice, never an overwrite. Saving, Done, and Discard remove the draft.
+
+- **Keyboard, through zenbot.** The page takes part in zenbot's keyboard model (PLUGINS.md, *Keys and
+  commands*), so the ring and the command list (Ctrl/Cmd+K) work from the editor. It declares:
+  **Save** (`Mod+S`), **Proofread** (`Mod+Shift+F`), **Shrink** (`Mod+Shift+U`), the first three in the
+  ring; **Marks** (`Mod+Shift+E`), **Find notes** (`Mod+Shift+Y`); **Alternatives for the selection**,
+  **Next tools tab**, **Next note tab**, **Open a note**, **Save and go back to reading** and **Back to
+  reading** (no key). Zenbot owns those shortcuts (the page does not handle them itself, and the owner can
+  rebind them); the other keys keep working as above. Ctrl/Meta chords the editor does not use (Ctrl+K,
+  Ctrl+., …) are handed to zenbot, and zenbot's *focus* puts the cursor in the editor. In a closed version
+  only the two leaving commands remain; reading offers none.
 
 Outside zenbot (the standalone app, Claude, ChatGPT) the page keeps its header and saves as you
 type.

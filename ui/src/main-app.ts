@@ -5,6 +5,7 @@ import { App as McpApp, applyDocumentTheme, applyHostStyleVariables, type McpUiH
 import App from './App.svelte';
 import { sizeOf, tokenAliases, zenOf } from './lib/host.ts';
 import { nav, requestOpen, type ZenContext } from './lib/nav.svelte.ts';
+import { forwardKeys, zenBridge } from './lib/zen.ts';
 import { mcpAi, mcpHost, mcpStore } from './stores/mcp.ts';
 import './app.css';
 
@@ -61,10 +62,19 @@ app.onhostcontextchanged = (changed) => {
   if (z?.path && z.path !== nav.request?.path) requestOpen(z.path);
 };
 
+// zenbot's keyboard model (lib/zen.ts): under zenbot only, the page declares its commands, hands over the
+// keys it did not use and runs what zenbot picks. The channel carries any method: the SDK does not
+// check `zen/` notifications, so they go out with `notification` and come in by the fallback handler.
+const zenb = zenBridge((method, params) => {
+  if (nav.zen) void app.notification({ method, params } as never).catch(() => {});
+});
+app.fallbackNotificationHandler = async (n) => zenb.received(n.method, n.params);
+forwardKeys(zenb, () => !!nav.zen);
+
 await app.connect();
 look(app.getHostContext());
 const zen = zenOf(app.getHostContext());
 place(zen);
 if (zen?.path && !nav.request) requestOpen(zen.path);
 
-mount(App, { target: document.getElementById('app')!, props: { store: mcpStore(app), ai: mcpAi(app), host: mcpHost(app) } });
+mount(App, { target: document.getElementById('app')!, props: { store: mcpStore(app), ai: mcpAi(app), host: mcpHost(app, zenb.host) } });

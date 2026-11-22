@@ -5,6 +5,7 @@
 import type { Changed } from '../../../core/notes.ts';
 import type { Version, VersionState } from '../../../core/versions.ts';
 import type { Fix, Proposal, SuggestRequest } from '../../../core/ai.ts';
+import type { ZenHost } from './zen.ts';
 
 export { Conflict } from '../../../core/notes.ts';
 export type { Changed, Version, VersionState, Fix, Proposal, SuggestRequest };
@@ -59,6 +60,8 @@ export interface Host {
   openNote?(path: string, mode?: 'read' | 'edit'): Promise<boolean>;
   /** The note now open, for hosts that listen (a chat knowing what you write). */
   noteOpened?(path: string, words: number): void;
+  /** zenbot's keyboard model (commands, keys, focus), when the page runs inside it; see lib/zen.ts. */
+  zen?: ZenHost;
 }
 
 /** An Ai that is switched off, with the reason. */

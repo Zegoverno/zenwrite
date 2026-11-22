@@ -30,6 +30,7 @@
     type Family, type Fix,
   } from './fixes.ts';
   import CheckPanel from './CheckPanel.svelte';
+  import { writerCommands } from '../lib/zen.ts';
 
   let { path, text, hash, store, ai, host, keys = true, reading = false, hosted = false, phone = false, open, create }: {
     path: string; text: string; hash: string | null;
@@ -51,6 +52,9 @@
   const api = untrack(() => makeApi(store, ai));
   // Hosted, saving is the writer's call: no autosave, so typing is kept as a draft until Ctrl/Cmd+S.
   const manual = untrack(() => hosted);
+  // Under zenbot the page takes part in its keyboard model (lib/zen.ts): zenbot owns the shortcuts of the
+  // commands declared below, so the page does not handle those keys itself (Ctrl/Cmd+S included).
+  const zen = untrack(() => (hosted ? host.zen : undefined));
   const saveKey = /Mac|iPhone|iPad/.test(globalThis.navigator?.platform ?? '') ? '⌘S' : 'Ctrl+S';
   // The quiet line's one-off notices ("Saved", "Draft restored") and the question asked on leaving.
   let notice = $state('');
@@ -517,7 +521,7 @@
   }
   function windowKey(e: KeyboardEvent) {
     if (!manual || e.defaultPrevented) return;
-    if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
+    if (!zen && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 's') {
       e.preventDefault();
       void saveNow();
     } else if (e.key === 'Escape' && !reading && !viewing) {
@@ -533,6 +537,24 @@
       e.preventDefault();
       askLeave(toReader);
     }
+  }
+
+  /** What zenbot runs when the owner picks one of the page's commands (see writerCommands). */
+  function runCommand(id: string) {
+    if (!view) return;
+    const writing = tools && !viewing && !reading;
+    if (id === 'open-note') opening = !opening;
+    else if (id === 'back-to-reading') viewing ? void toReader() : askLeave(toReader);
+    else if (!writing) return;
+    else if (id === 'save') void saveNow();
+    else if (id === 'proofread') ((pass = 'check'), void ask('check'));
+    else if (id === 'marks') ((pass = 'marks'), void ask('marks'));
+    else if (id === 'shrink') void ask('shrink');
+    else if (id === 'find-notes') void findNotes();
+    else if (id === 'alternatives') openPanel();
+    else if (id === 'tools') openLeft(after(LEFT, left));
+    else if (id === 'note-panel') openRight(after(RIGHT, right));
+    else if (id === 'done') void done();
   }
 
   /** Takes the file as the server has it: the page shows it, and it counts as saved. */
@@ -778,7 +800,7 @@
       extensions: [
         Prec.highest(keymap.of([
           { key: 'Escape', run: () => picked !== null && ((picked = null), true) },
-          { key: 'Mod-s', run: () => (manual ? (void saveNow(), true) : store.download ? (download(), true) : (save(), true)) },
+          ...(zen ? [] : [{ key: 'Mod-s', run: () => (manual ? (void saveNow(), true) : store.download ? (download(), true) : (save(), true)) }]),
         ])),
         history(),
         drawSelection(),
@@ -849,7 +871,10 @@
     window.addEventListener('beforeunload', leave);
     window.addEventListener('pagehide', leave);
     document.addEventListener('visibilitychange', hidden);
+    const unzen = [zen?.onCommand(runCommand), zen?.onFocus((on) => on && view.focus())];
     return () => {
+      for (const off of unzen) off?.();
+      zen?.commands([]);
       // Leaving the pane (another file, the reader, a closed panel) saves what is left.
       if (manual) putDraft();
       else if (status === 'unsaved') save();
@@ -860,6 +885,11 @@
       clearInterval(polling);
       view.destroy();
     };
+  });
+
+  // zenbot gets the commands that make sense now: none while a note is read, fewer in a closed version.
+  $effect(() => {
+    zen?.commands(writerCommands({ reading, viewing: !!viewing }));
   });
 
   // The host may switch between reading and writing while the note is open.

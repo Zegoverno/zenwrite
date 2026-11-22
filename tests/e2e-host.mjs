@@ -40,6 +40,9 @@ async function host(p, hostContext, open) {
     const frame = document.getElementById('app');
     const send = (m) => frame.contentWindow.postMessage({ jsonrpc: '2.0', ...m }, '*');
     window.links = [];
+    window.zenSent = [];
+    window.zenCommands = [];
+    window.zenSend = (method, params) => send({ method, params });
     window.setContext = (ctx) => send({ method: 'ui/notifications/host-context-changed', params: ctx });
     window.addEventListener('message', async (e) => {
       if (e.source !== frame.contentWindow) return;
@@ -58,6 +61,17 @@ async function host(p, hostContext, open) {
       } else if (m.method === 'ui/open-link') {
         window.links.push(m.params.url);
         send({ id: m.id, result: {} });
+      } else if (m.id === undefined && m.method?.startsWith('zen/')) {
+        // zenbot's keyboard model: record what the page sends, and answer a forwarded key that is a
+        // declared shortcut with the command, as zenbot does.
+        window.zenSent.push({ method: m.method, params: m.params });
+        if (m.method === 'zen/commands') window.zenCommands = m.params.commands;
+        if (m.method === 'zen/key') {
+          const k = m.params;
+          const form = [k.ctrl ? 'Mod' : '', k.alt ? 'Alt' : '', k.shift && /^(\p{L}|.{2,})$/u.test(k.key) ? 'Shift' : '', k.key.length === 1 ? k.key.toLowerCase() : k.key].filter(Boolean).join('+');
+          const c = (window.zenCommands ?? []).find((x) => x.key === form);
+          if (c) send({ method: 'zen/command', params: { id: c.id } });
+        }
       } else if (m.id !== undefined && m.method) {
         send({ id: m.id, result: {} }); // ping, update-model-context, size...
       }
@@ -86,6 +100,12 @@ try {
   await app.locator('.status-saved').waitFor({ timeout: 10_000 });
   assert.match(await fs.readFile(path.join(dir, 'Fixture.md'), 'utf8'), /Typed in the app\./);
   assert.ok(calls.includes('zenwrite_save'));
+
+  step = 'outside zenbot nothing of its keyboard model is sent';
+  await page.keyboard.press('Control+Shift+f');
+  await page.keyboard.press('Control+b');
+  await page.waitForTimeout(150);
+  assert.deepEqual(await page.evaluate(() => window.zenSent), []);
 
   step = 'a note changed on disk is refused, not overwritten';
   await fs.writeFile(path.join(dir, 'Fixture.md'), '# Fixture\n\nChanged elsewhere.\n');
@@ -330,6 +350,99 @@ try {
     await back.a.locator('.banner[role=alert]').waitFor({ timeout: 8000 });
     assert.equal(await onDisk('Zen.md'), '# Zen\n\nChanged by an agent.\n');
     await back.p.close();
+  }
+
+  step = 'zenbot keys: the writer declares its commands';
+  {
+    await fs.writeFile(path.join(dir, 'Zen.md'), '# Zen\n\nCalm words.\n');
+    await client.callTool({ name: 'zenwrite_draft_drop', arguments: { path: 'Zen.md' } });
+    const { p, a } = await zenHost('Zen.md');
+    const sent = () => p.evaluate(() => window.zenSent);
+    const declared = () => p.evaluate(() => window.zenCommands);
+    for (let i = 0; i < 50 && !(await declared()).length; i++) await p.waitForTimeout(100);
+    const cmds = await declared();
+    assert.deepEqual(cmds.map((c) => c.id), ['save', 'proofread', 'shrink', 'marks', 'find-notes', 'alternatives', 'tools', 'note-panel', 'done', 'open-note', 'back-to-reading']);
+    assert.deepEqual(cmds.filter((c) => c.ring).map((c) => c.id), ['save', 'proofread', 'shrink'], 'the first three ask for the ring');
+    assert.deepEqual(Object.fromEntries(cmds.filter((c) => c.key).map((c) => [c.id, c.key])), {
+      save: 'Mod+s', proofread: 'Mod+Shift+f', shrink: 'Mod+Shift+u', marks: 'Mod+Shift+e', 'find-notes': 'Mod+Shift+y',
+    });
+    const reserved = ['Mod+k', 'Mod+.', 'Mod+\\', 'Mod+Shift+\\', '?', 'Escape', 'g'];
+    assert.ok(cmds.every((c) => !reserved.includes(c.key)), 'no key zenbot keeps for itself');
+    assert.ok(cmds.every((c) => /^[a-z0-9-]{1,32}$/.test(c.id) && c.title.length <= 60));
+    assert.equal((await sent()).filter((m) => m.method === 'zen/commands').length, 1, 'declared once');
+
+    step = 'zenbot keys: zen/command runs the writer\'s commands';
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Control+End');
+    await p.keyboard.type(' Via ring.');
+    await a.locator('.zb-status', { hasText: 'Unsaved changes' }).waitFor();
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'save' }));
+    await a.locator('.zb-status', { hasText: 'Saved' }).waitFor({ timeout: 5000 });
+    assert.match(await onDisk('Zen.md'), /Via ring\./);
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'proofread' }));
+    await a.locator('.panel .err').waitFor({ timeout: 10_000 });
+    assert.match(await a.locator('.panel .err').textContent(), /AI isn't available here/);
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'marks' }));
+    await a.locator('.pass button.on', { hasText: 'Marks' }).waitFor({ timeout: 5000 });
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'shrink' }));
+    await a.locator('.shrink-goal').waitFor({ timeout: 5000 });
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'note-panel' }));
+    await a.locator('.side').waitFor({ timeout: 5000 });
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'open-note' }));
+    await a.locator('.opener').waitFor({ timeout: 5000 });
+    await p.keyboard.press('Alt+o');
+    await a.locator('.opener').waitFor({ state: 'detached' });
+
+    step = 'zenbot keys: the shortcut is zenbot\'s: forwarded, not handled by the page';
+    await a.locator('.cm-content').click();
+    await p.keyboard.press('Control+End');
+    await p.keyboard.type(' Unsaved.');
+    await p.evaluate(() => { window.zenSent.length = 0; window.zenCommands = []; }); // a host that resolves nothing
+    await p.keyboard.press('Control+s');
+    await p.waitForFunction(() => window.zenSent.some((m) => m.method === 'zen/key'), null, { timeout: 5000 });
+    assert.deepEqual((await sent()).at(-1), { method: 'zen/key', params: { key: 's', code: 'KeyS', ctrl: true, meta: false, alt: false, shift: false, typing: true } });
+    await p.waitForTimeout(300);
+    assert.doesNotMatch(await onDisk('Zen.md'), /Unsaved\./, 'the page did not save by itself');
+    await a.locator('.zb-status', { hasText: 'Unsaved changes' }).waitFor({ timeout: 5000 });
+
+    step = 'zenbot keys: forwards what the page and the editor did not use, only Ctrl/Meta chords while typing';
+    await p.evaluate(() => { window.zenSent.length = 0; });
+    await p.keyboard.type('xyz'); // typing is the editor's
+    await p.keyboard.press('Control+z'); // CodeMirror's undo
+    await p.keyboard.press('Alt+l'); // the page's own
+    await p.keyboard.press('Alt+l');
+    await p.keyboard.press('Alt+l');
+    await p.keyboard.press('Control+b'); // nobody's: zenbot's to know
+    await p.keyboard.press('Control+k'); // zenbot's own
+    await p.waitForFunction(() => window.zenSent.filter((m) => m.method === 'zen/key').length >= 2, null, { timeout: 5000 });
+    await p.waitForTimeout(300);
+    assert.deepEqual((await sent()).map((m) => `${m.method} ${m.params.ctrl ? 'Ctrl+' : ''}${m.params.key}`), ['zen/key Ctrl+b', 'zen/key Ctrl+k']);
+    // not typing: plain keys go too
+    await p.evaluate(() => { window.zenSent.length = 0; document.getElementById('app').contentDocument.activeElement.blur(); });
+    await p.keyboard.press('g');
+    await p.waitForFunction(() => window.zenSent.length > 0, null, { timeout: 5000 });
+    assert.deepEqual((await sent()).map((m) => m.params), [{ key: 'g', code: 'KeyG', ctrl: false, meta: false, alt: false, shift: false, typing: false }]);
+
+    step = 'zenbot keys: zen/focus puts the focus in the editor';
+    const focused = () => p.evaluate(() => document.getElementById('app').contentDocument.activeElement?.classList.contains('cm-content'));
+    assert.equal(await focused(), false);
+    await p.evaluate(() => window.zenSend('zen/focus', { focused: false }));
+    await p.waitForTimeout(150);
+    assert.equal(await focused(), false, 'losing the focus does nothing');
+    await p.evaluate(() => window.zenSend('zen/focus', { focused: true }));
+    await p.waitForFunction(() => document.getElementById('app').contentDocument.activeElement?.classList.contains('cm-content'), null, { timeout: 5000 });
+
+    step = 'zenbot keys: back to reading asks first, then goes (zen://open … mode=read)';
+    await p.evaluate(() => window.zenSend('zen/command', { id: 'back-to-reading' }));
+    await a.locator('.leave[role=alertdialog]').waitFor({ timeout: 5000 });
+    await a.locator('.leave button', { hasText: 'Discard' }).click();
+    await p.waitForFunction(() => window.links.length > 0, null, { timeout: 5000 });
+    assert.deepEqual(await p.evaluate(() => window.links), ['zen://open?path=Zen.md&mode=read']);
+
+    step = 'zenbot keys: reading offers no commands';
+    await p.evaluate(() => window.setContext({ zen: { pane: 'board', path: 'Zen.md', mode: 'read', slot: 'opener' } }));
+    await p.waitForFunction(() => window.zenSent.some((m) => m.method === 'zen/commands' && m.params.commands.length === 0), null, { timeout: 5000 });
+    await p.close();
   }
 
   assert.deepEqual(errors, [], `page errors: ${errors.join('; ')}`);

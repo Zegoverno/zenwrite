@@ -5,6 +5,7 @@
 import type { App } from '@modelcontextprotocol/ext-apps';
 import type { Ai, Changed, Fix, Host, Proposal, Store, SuggestRequest, VersionState } from '../lib/ports.ts';
 import { Conflict } from '../lib/ports.ts';
+import type { ZenHost } from '../lib/zen.ts';
 
 type Data = Record<string, unknown>;
 
@@ -89,8 +90,9 @@ export function mcpAi(app: App): Ai {
 /** zenbot's link to a file: `zen://open?path=<relative path>`. */
 export const zenOpen = (path: string, mode?: 'read' | 'edit') => `zen://open?path=${encodeURIComponent(path)}${mode ? `&mode=${mode}` : ''}`;
 
-export function mcpHost(app: App): Host {
+export function mcpHost(app: App, zen?: ZenHost): Host {
   return {
+    zen,
     openUrl: (url) => void app.openLink({ url }).catch(() => {}),
     // A file that is not a note: the host opens it (zenbot understands this link; others ignore it).
     openFile: (path) => void app.openLink({ url: zenOpen(path) }).catch(() => {}),
